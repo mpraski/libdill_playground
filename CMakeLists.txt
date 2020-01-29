@@ -8,7 +8,7 @@ set(EXECUTABLE_OUTPUT_PATH "bin")
 
 # compiler options
 if(CMAKE_COMPILER_IS_GNUCC)
-  add_definitions(-Wall -Werror -pedantic -std=c11)
+  add_definitions(-Wall -Werror -pedantic -std=c99)
 endif(CMAKE_COMPILER_IS_GNUCC)
 
 # set the project name

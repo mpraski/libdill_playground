@@ -4,6 +4,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define MESSAGE_BUF_SZ 1024
+
 coroutine void worker(const char *text) {
   while (1) {
     printf("%s\n", text);
@@ -93,13 +95,23 @@ int main() {
   printf("Detached HTTP layer\n");
 
   if (strncmp(command, "POST", 4) == 0) {
-    size_t data_sz = ((size_t)content_length * sizeof(char)) + 1;
-    char *data = (char *)malloc(data_sz);
+    size_t data_sz = (size_t)content_length * sizeof(char);
+    size_t n = data_sz / MESSAGE_BUF_SZ;
+    size_t l = data_sz % MESSAGE_BUF_SZ;
 
-    rc = brecv(s, data, data_sz - 1, -1);
-    assert(rc >= 0);
+    char *data = malloc(data_sz + 1);
 
-    data[data_sz - 1] = '\0';
+    for(size_t i = 0; i < n; ++i) {
+    	rc = brecv(s, data + i * MESSAGE_BUF_SZ, MESSAGE_BUF_SZ, -1);
+    	assert(rc >= 0);
+    }
+
+    if(l) {
+    	rc = brecv(s, data + MESSAGE_BUF_SZ * n, l, -1);
+    	assert(rc >= 0);
+    }
+
+    data[data_sz] = '\0';
 
     fprintf(stdout, "%s\n", data);
   }

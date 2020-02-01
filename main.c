@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define MESSAGE_BUF_SZ 1024
+#define MESSAGE_BUF_SZ 1024u
 
 coroutine void worker(const char *text) {
   while (1) {
@@ -59,7 +59,7 @@ int main() {
 
   printf("Attached HTTP layer\n");
 
-  int content_length;
+  unsigned long content_length;
   char command[64];
   char resource[256];
 
@@ -78,7 +78,7 @@ int main() {
     printf("%s: %s\n", name, value);
 
     if (strncmp(name, "Content-Length", 14) == 0) {
-      content_length = atoi(value);
+      content_length = strtoul(value, NULL, 0);
     }
   }
 
@@ -94,12 +94,12 @@ int main() {
 
   printf("Detached HTTP layer\n");
 
-  if (strncmp(command, "POST", 4) == 0) {
-    size_t data_sz = (size_t)content_length * sizeof(char);
+  if (content_length && !strncmp(command, "POST", 4)) {
+    size_t data_sz = content_length * sizeof(char);
     size_t n = data_sz / MESSAGE_BUF_SZ;
     size_t l = data_sz % MESSAGE_BUF_SZ;
 
-    char *data = malloc(data_sz + 1);
+    char *data = malloc((content_length + 1) * sizeof(char));
 
     for(size_t i = 0; i < n; ++i) {
     	rc = brecv(s, data + i * MESSAGE_BUF_SZ, MESSAGE_BUF_SZ, -1);
@@ -116,7 +116,7 @@ int main() {
     fprintf(stdout, "%s\n", data);
   }
 
-  /* Close the underlying TCP co22222222222nnection. */
+  /* Close the underlying TCP connection. */
   rc = tcp_close(s, -1);
   assert(rc == 0);
 

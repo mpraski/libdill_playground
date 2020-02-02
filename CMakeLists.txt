@@ -1,5 +1,13 @@
 cmake_minimum_required(VERSION 3.10)
 
+if (APPLE)
+  message("Please set the correct version of OpenSSL if using brew on MacOS ($OPENSSL_VERSION = $ENV{OPENSSL_VERSION})")
+  message("This is required as brew won't symlink include and lib directories to /usr/local/{include, lib}")
+
+  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -I/usr/local/opt/openssl$ENV{OPENSSL_VERSION}/include")
+  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -L/usr/local/opt/openssl$ENV{OPENSSL_VERSION}/lib")
+endif ()
+
 # disable tests for libdill
 set(BUILD_TESTING false)
 

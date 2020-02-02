@@ -103,15 +103,17 @@ cleanup:
   assert(rc == 0);
 }
 
-int main() {
-  int port = 1234;
-  struct ipaddr addr;
-
+int main(int argc, char *argv[]) {
   if (signal(SIGINT, sig_handler) == SIG_ERR) {
     perror("Can't register signal handlerx");
     return 1;
   }
 
+  int port = 1234;
+  if (argc > 1)
+    port = atoi(argv[1]);
+
+  struct ipaddr addr;
   int rc = ipaddr_local(&addr, NULL, port, 0);
   if (rc < 0) {
     perror("Can't open socket on local address");

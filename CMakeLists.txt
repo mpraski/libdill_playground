@@ -14,11 +14,6 @@ set(BUILD_TESTING false)
 # set executable build path
 set(EXECUTABLE_OUTPUT_PATH "bin")
 
-# compiler options
-if(CMAKE_COMPILER_IS_GNUCC)
-  add_definitions(-Wall -Werror -pedantic -std=c99)
-endif(CMAKE_COMPILER_IS_GNUCC)
-
 # set the project name
 project(libdill_playground)
 

@@ -1,13 +1,17 @@
 #include <assert.h>
 #include <libdill.h>
 #include <signal.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "rpa_queue.h"
+
 #define MESSAGE_BUF_SZ 1024u
 #define SOCKET_TIMEOUT 1000
 #define TIMEOUT -1
+#define QUEUE_CAPACITY 100u
 
 volatile sig_atomic_t done;
 
@@ -27,19 +31,17 @@ coroutine void worker(int s) {
 
   int rc;
   unsigned long content_length;
-  char command[64];
-  char resource[256];
+  char name[256];
+  char value[256];
 
-  http_recvrequest(s, command, sizeof(command), resource, sizeof(resource),
-                   TIMEOUT);
+  http_recvrequest(s, name, sizeof(name), value, sizeof(value), TIMEOUT);
 
   printf("=====\n");
-  printf("%s %s\n=====\n", command, resource);
+  printf("%s %s\n=====\n", name, value);
+
+  int is_post = !strncmp(name, "POST", 4);
 
   while (1) {
-    char name[256];
-    char value[256];
-
     int rc =
         http_recvfield(s, name, sizeof(name), value, sizeof(value), TIMEOUT);
     if (rc == -1) {
@@ -64,7 +66,7 @@ coroutine void worker(int s) {
   if (s < 0)
     goto cleanup;
 
-  if (content_length && !strncmp(command, "POST", 4)) {
+  if (is_post && content_length) {
     size_t data_sz = content_length * sizeof(char);
     size_t n = data_sz / MESSAGE_BUF_SZ;
     size_t l = data_sz % MESSAGE_BUF_SZ;
@@ -103,9 +105,44 @@ cleanup:
   assert(rc == 0);
 }
 
+void *slave(void *q) {
+  rpa_queue_t *queue = (rpa_queue_t *)q;
+
+  int b = bundle();
+  if (b < 0) {
+    perror("Can't create libdill bundle");
+    return NULL;
+  }
+
+  while (1) {
+    int s;
+    if (!rpa_queue_pop(queue, (void **)&s)) {
+      fprintf(stderr, "Can't pop item off a queue\n");
+    }
+
+    if (s == -1)
+      break;
+
+    int cr = bundle_go(b, worker(s));
+    if (cr < 0) {
+      perror("Can't start a coroutine");
+      return NULL;
+    }
+  }
+
+  int rc = bundle_wait(b, now() + SOCKET_TIMEOUT);
+  if (!(rc == 0 || (rc < 0 && errno == ETIMEDOUT))) {
+    perror("Failed to wait for libdill bundle");
+    return NULL;
+  }
+
+  return NULL;
+}
+
 int main(int argc, char *argv[]) {
+  // TO-DO handler signals in a multi-thread environment
   if (signal(SIGINT, sig_handler) == SIG_ERR) {
-    perror("Can't register signal handlerx");
+    perror("Can't register signal handler");
     return 1;
   }
 
@@ -136,14 +173,53 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
+  // prepare the threads
+  unsigned c_proc = 0;
+  unsigned n_proc = 4;
+
+  rpa_queue_t *queues = (rpa_queue_t *)malloc(n_proc * sizeof(rpa_queue_t));
+  pthread_t *threads = (pthread_t *)malloc(n_proc * sizeof(pthread_t));
+
+  for (unsigned i = 0; i < n_proc; ++i) {
+    rpa_queue_t *q = &queues[i];
+    if (!rpa_queue_create(&q, QUEUE_CAPACITY)) {
+      perror("Can't initialize a queue");
+      return 1;
+    }
+
+    int rc = pthread_create(&threads[i], NULL, slave, (void*) q);
+    if(rc < 0) {
+      perror("Can't create a thread");
+      return 1;
+    }
+  }
+
   while (!done) {
     int s = tcp_accept(ls, NULL, now() + SOCKET_TIMEOUT);
     if (s < 0)
       continue;
 
-    int cr = bundle_go(b, worker(s));
-    if (cr < 0) {
-      perror("Can't start a coroutine");
+    if (!rpa_queue_push(&queues[c_proc], (void*)(uintptr_t)(s))) {
+      perror("Can't push to a queue");
+      return 1;
+    }
+
+    c_proc = (c_proc + 1) % n_proc;
+  }
+
+  // signal an end to the threads
+  for (unsigned i = 0; i < n_proc; ++i) {
+    if (!rpa_queue_push(&queues[c_proc], (void *)-1)) {
+      perror("Can't push to a queue");
+      return 1;
+    }
+  }
+
+  // join the threads
+  for (unsigned i = 0; i < n_proc; ++i) {
+    int rc = pthread_join(threads[i], NULL);
+    if(rc < 0) {
+      perror("Can't join a thread");
       return 1;
     }
   }

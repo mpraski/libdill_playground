@@ -15,16 +15,20 @@ set(BUILD_TESTING false)
 set(EXECUTABLE_OUTPUT_PATH "bin")
 
 # set the project name
-project(libdill_playground)
+project(libdill_playground C)
+
+# find pthreads
+find_package(Threads REQUIRED)
 
 # add the libdill subdirectory
 add_subdirectory(libdill)
 
 # add the executable
-add_executable(libdill_playground main.c)
+add_executable(libdill_playground main.c rpa_queue.c)
 
 # include libdill
 target_include_directories(libdill_playground PRIVATE libdill)
 
 # link libdill
 target_link_libraries(libdill_playground dill)
+target_link_libraries (libdill_playground ${CMAKE_THREAD_LIBS_INIT})

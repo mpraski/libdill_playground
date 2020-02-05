@@ -1,21 +1,20 @@
 #include <assert.h>
+#include <errno.h>
+#include <fcntl.h>
 #include <libdill.h>
+#include <netdb.h>
+#include <netinet/in.h>
 #include <signal.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
-#include <errno.h>
-#include <fcntl.h>
-#include <netdb.h>
-#include <netinet/in.h>
-#include <signal.h>
 #include <sys/socket.h>
+#include <unistd.h>
 
 #if defined __APPLE__ || __OpenBSD__ || __FreeBSD__ || __DragonFly__
-#include <sys/types.h>
 #include <sys/sysctl.h>
+#include <sys/types.h>
 #elif defined __linux__
 #include <sys/sysinfo.h>
 #endif
@@ -69,7 +68,7 @@ static int cpu_num() {
 #if defined __APPLE__ || __OpenBSD__ || __FreeBSD__ || __DragonFly__
   int mib[4];
   int num_proc;
-  size_t num_proc_len = sizeof(num_proc); 
+  size_t num_proc_len = sizeof(num_proc);
 
   mib[0] = CTL_HW;
   mib[1] = HW_AVAILCPU;
@@ -77,9 +76,9 @@ static int cpu_num() {
   sysctl(mib, 2, &num_proc, &num_proc_len, NULL, 0);
 
   if (num_proc < 1) {
-      mib[1] = HW_NCPU;
-      sysctl(mib, 2, &num_proc, &num_proc_len, NULL, 0);
-      if (num_proc < 1) num_proc = 1;
+    mib[1] = HW_NCPU;
+    sysctl(mib, 2, &num_proc, &num_proc_len, NULL, 0);
+    if (num_proc < 1) num_proc = 1;
   }
 
   return num_proc;
@@ -97,7 +96,7 @@ static coroutine void worker(int s) {
   char name[256];
   char value[256];
 
-  http_recvrequest(s, name, sizeof(name), value, sizeof(value), TIMEOUT);
+  http_recvrequest(s, name, sizeof(name), value, sizeof(value), -1);
 
   printf("=====\n");
   printf("%s %s\n=====\n", name, value);
@@ -184,8 +183,14 @@ static void *slave(void *q) {
 
     if (s == -1) break;
 
+    int rc = fdin(s, -1);
+    if (rc < 0) {
+      perror("OS socket not readable");
+      return NULL;
+    }
+
     s = tcp_fromfd(s);
-    if(s < 0) {
+    if (s < 0) {
       perror("Can't wrap an OS connection");
       return NULL;
     }
@@ -277,6 +282,8 @@ int main(int argc, char *argv[]) {
       perror("Can't push to a queue");
       return 1;
     }
+
+    printf(">> New connection %d on thread %d\n", s, c_proc);
 
     c_proc = (c_proc + 1 == n_proc ? 0 : c_proc + 1);
   }

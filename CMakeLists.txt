@@ -8,6 +8,8 @@ if (APPLE)
   set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -L/usr/local/opt/openssl$ENV{OPENSSL_VERSION}/lib")
 endif ()
 
+set(CMAKE_BUILD_TYPE Debug)
+
 # disable tests for libdill
 set(BUILD_TESTING false)
 

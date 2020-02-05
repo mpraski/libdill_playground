@@ -21,7 +21,7 @@
 #include <string.h>
 
 // uncomment to print debug messages
-#define QUEUE_DEBUG
+// #define QUEUE_DEBUG
 
 #ifdef QUEUE_DEBUG
 static void Q_DBG(const char*msg, rpa_queue_t *q) {

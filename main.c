@@ -5,21 +5,26 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
+#include <unistd.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <signal.h>
 #include <sys/socket.h>
+
+#if defined __APPLE__ || __OpenBSD__ || __FreeBSD__ || __DragonFly__
+#include <sys/types.h>
+#include <sys/sysctl.h>
+#elif defined __linux__
 #include <sys/sysinfo.h>
-#include <unistd.h>
+#endif
 
 #include "rpa_queue.h"
 
 #define TIMEOUT -1
 #define MESSAGE_BUF_SZ 1024u
-#define QUEUE_CAPACITY 100u
+#define QUEUE_CAPACITY 64u
 
 volatile sig_atomic_t done;
 
@@ -29,7 +34,26 @@ static void sig_handler(int sig, siginfo_t *siginfo, void *context) {
   }
 }
 
-void unblock(int s) {
+static int set_sig_handler() {
+  struct sigaction act;
+
+  memset(&act, 0, sizeof(act));
+
+  act.sa_sigaction = &sig_handler;
+  act.sa_flags = SA_SIGINFO | SA_RESTART;
+
+  return sigaction(SIGINT, &act, NULL);
+}
+
+static int block_signal(int sig) {
+  sigset_t set;
+  sigemptyset(&set);
+  sigaddset(&set, sig);
+
+  return pthread_sigmask(SIG_BLOCK, &set, NULL);
+}
+
+static void unblock(int s) {
   int opt = fcntl(s, F_GETFL, 0);
   if (opt == -1) opt = 0;
 
@@ -41,7 +65,30 @@ void unblock(int s) {
   assert(rc == 0);
 }
 
-coroutine void worker(int s) {
+static int cpu_num() {
+#if defined __APPLE__ || __OpenBSD__ || __FreeBSD__ || __DragonFly__
+  int mib[4];
+  int num_proc;
+  size_t num_proc_len = sizeof(num_proc); 
+
+  mib[0] = CTL_HW;
+  mib[1] = HW_AVAILCPU;
+
+  sysctl(mib, 2, &num_proc, &num_proc_len, NULL, 0);
+
+  if (num_proc < 1) {
+      mib[1] = HW_NCPU;
+      sysctl(mib, 2, &num_proc, &num_proc_len, NULL, 0);
+      if (num_proc < 1) num_proc = 1;
+  }
+
+  return num_proc;
+#elif defined __linux__
+  return get_nprocs();
+#endif
+}
+
+static coroutine void worker(int s) {
   s = http_attach(s);
   if (s < 0) goto cleanup;
 
@@ -119,12 +166,8 @@ cleanup:
   assert(rc == 0);
 }
 
-void *slave(void *q) {
-  sigset_t set;
-  sigemptyset(&set);
-  sigaddset(&set, SIGINT);
-
-  int rc = pthread_sigmask(SIG_BLOCK, &set, NULL);
+static void *slave(void *q) {
+  int rc = block_signal(SIGINT);
   if (rc < 0) {
     perror("Can't block signals");
     return NULL;
@@ -141,6 +184,12 @@ void *slave(void *q) {
 
     if (s == -1) break;
 
+    s = tcp_fromfd(s);
+    if(s < 0) {
+      perror("Can't wrap an OS connection");
+      return NULL;
+    }
+
     int cr = go(worker(s));
     if (cr < 0) {
       perror("Can't start a coroutine");
@@ -152,15 +201,9 @@ void *slave(void *q) {
 }
 
 int main(int argc, char *argv[]) {
-  struct sigaction act;
-
-  memset(&act, 0, sizeof(act));
-
-  act.sa_sigaction = &sig_handler;
-  act.sa_flags = SA_SIGINFO | SA_RESTART;
-
   // set signal handler
-  if (sigaction(SIGINT, &act, NULL) < 0) {
+  int rc = set_sig_handler();
+  if (rc < 0) {
     perror("Can't register signal handler");
     return 1;
   }
@@ -186,7 +229,7 @@ int main(int argc, char *argv[]) {
   serv_addr.sin_port = htons(port);
 
   // bind the socket
-  int rc = bind(fd, (struct sockaddr *)&serv_addr, sizeof(serv_addr));
+  rc = bind(fd, (struct sockaddr *)&serv_addr, sizeof(serv_addr));
   if (rc < 0) {
     perror("Failed to bind socket");
     return 1;
@@ -201,7 +244,7 @@ int main(int argc, char *argv[]) {
 
   // prepare the threads
   int c_proc = 0;
-  int n_proc = get_nprocs() - 1;
+  int n_proc = cpu_num() - 1;
 
   if (!n_proc) {
     fprintf(stderr, "only one cpu, aborting...\n");
